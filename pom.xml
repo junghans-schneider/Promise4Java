@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>de.junghansschneider</groupId>
+    <artifactId>promise4java</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+
+    <name>Promise4Java</name>
+    <description>Promises for Java</description>
+    <url>https://github.com/junghans-schneider/Promise4Java</url>
+
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://github.com/junghans-schneider/Promise4Java/blob/master/LICENSE</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <scm>
+        <url>https://github.com/junghans-schneider/Promise4Java.git</url>
+    </scm>
+
+    <properties>
+        <maven.compiler.source>1.7</maven.compiler.source>
+        <maven.compiler.target>1.7</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.11</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <developers>
+        <developer>
+            <id>til-schneider</id>
+            <name>Til Schneider</name>
+            <email>github@murfman.de</email>
+            <url>http://junghans-schneider.de/</url>
+            <roles>
+                <role>developer</role>
+            </roles>
+        </developer>
+    </developers>
+
+</project>
