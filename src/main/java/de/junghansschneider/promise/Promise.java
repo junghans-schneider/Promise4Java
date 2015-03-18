@@ -30,6 +30,8 @@ public abstract class Promise {
 
     protected static enum State { QUEUED, EXECUTING, PENDING, DONE, FAILED, CANCELLED };
 
+    protected static PromiseHandler<?> mFallbackErrorHandler;
+
 
     protected State mState = State.QUEUED;
     protected Object mValue;
@@ -49,6 +51,10 @@ public abstract class Promise {
         if (executeNow) {
             execute(executor);
         }
+    }
+
+    public static void setFallbackErrorHandler(PromiseHandler<?> fallbackErrorHandler) {
+        mFallbackErrorHandler = fallbackErrorHandler;
     }
 
     protected abstract void execute(Resolver resolver);
@@ -71,7 +77,7 @@ public abstract class Promise {
         return chainedPromise;
     }
 
-    public void handle(PromiseHandler<?> handler) {
+    public Promise handle(PromiseHandler<?> handler) {
         synchronized(this) {
             if (isFinished()) {
                 fireFinished(handler);
@@ -82,6 +88,21 @@ public abstract class Promise {
                 mHandlers.add(handler);
             }
         }
+        return this;
+    }
+
+    public Promise end() {
+        if (mFallbackErrorHandler == null) {
+            mFallbackErrorHandler = new PromiseHandler<Void>() {
+                public Object onError(Throwable thr) throws Throwable {
+                    onFallbackError("Error at the end of a promise chain", thr);
+                    return null;
+                }
+            };
+        }
+
+        handle(mFallbackErrorHandler);
+        return this;
     }
 
     public boolean cancel() {
