@@ -251,9 +251,12 @@ public class PromiseTest extends TestCase {
         Promise firstPromise = waitForever();
         firstPromise.handle(new PromiseHandler<Object>() {
             @Override
-            public void onCancel() {
+            public Object onError(Throwable thr) throws Throwable {
                 assertFalse(handlerCalled[1]);
-                handlerCalled[0] = true;
+                if (Promise.isCancelled(thr)) {
+                    handlerCalled[0] = true;
+                }
+                return null;
             }
             @Override
             public void onFinally() {
@@ -268,7 +271,7 @@ public class PromiseTest extends TestCase {
     }
 
     public void testComplexCancelForward() throws Throwable {
-        final boolean[] handlerCalled = new boolean[] { false };
+        final boolean[] handledCancel = new boolean[] { false };
         final LinkedList<Promise> promises = new LinkedList<Promise>();
         final Promise[] waitPromise = new Promise[1];
 
@@ -294,14 +297,17 @@ public class PromiseTest extends TestCase {
         promises.add(promises.getLast().then(new PromiseHandler<Object>() {}));
         promises.add(promises.getLast().then(new PromiseHandler<Object>() {
             @Override
-            public void onCancel() {
-                handlerCalled[0] = true;
+            public Object onError(Throwable thr) throws Throwable {
+                if (Promise.isCancelled(thr)) {
+                    handledCancel[0] = true;
+                }
+                throw thr;
             }
         }));
         promises.add(promises.getLast().then(new PromiseHandler<Object>() {}));
         promises.add(promises.getLast().then(new PromiseHandler<Object>() {}));
 
-        assertFalse(handlerCalled[0]);
+        assertFalse(handledCancel[0]);
         for (Promise promise : promises) {
             assertFalse(promise.isFinished());
             assertFalse(promise.isCancelled());
@@ -309,7 +315,7 @@ public class PromiseTest extends TestCase {
 
         waitPromise[0].cancel();
 
-        assertTrue(handlerCalled[0]);
+        assertTrue(handledCancel[0]);
         for (Promise promise : promises) {
             assertTrue(promise.isFinished());
             assertTrue(promise.isCancelled());
@@ -322,7 +328,7 @@ public class PromiseTest extends TestCase {
     }
 
     public void doTestComplexCancelBackward(boolean wholeChain) throws Throwable {
-        final boolean[] handlerCalled = new boolean[] { false };
+        final boolean[] handledCancel = new boolean[] { false };
         final LinkedList<Promise> promises = new LinkedList<Promise>();
 
         Promise outerPromise = new Promise() {
@@ -346,14 +352,17 @@ public class PromiseTest extends TestCase {
         promises.add(promises.getLast().then(new PromiseHandler<Object>() {}));
         promises.add(promises.getLast().then(new PromiseHandler<Object>() {
             @Override
-            public void onCancel() {
-                handlerCalled[0] = true;
+            public Object onError(Throwable thr) throws Throwable {
+                if (Promise.isCancelled(thr)) {
+                    handledCancel[0] = true;
+                }
+                return null;
             }
         }));
         promises.add(promises.getLast().then(new PromiseHandler<Object>() {}));
         promises.add(promises.getLast().then(new PromiseHandler<Object>() {}));
 
-        assertFalse(handlerCalled[0]);
+        assertFalse(handledCancel[0]);
         for (Promise promise : promises) {
             assertFalse(promise.isFinished());
             assertFalse(promise.isCancelled());
@@ -362,7 +371,7 @@ public class PromiseTest extends TestCase {
         Promise lastPromise = promises.getLast();
         lastPromise.cancel(wholeChain);
 
-        assertEquals(wholeChain, handlerCalled[0]);
+        assertEquals(wholeChain, handledCancel[0]);
         for (Promise promise : promises) {
             boolean expectCancelled = (wholeChain || promise == lastPromise);
             assertEquals(expectCancelled, promise.isFinished());
@@ -496,7 +505,7 @@ public class PromiseTest extends TestCase {
     }
 
     public void testAllCancelForward() {
-        final boolean[] handlerCalled = new boolean[] { false };
+        final boolean[] handledCancel = new boolean[] { false };
 
         Promise promise1 = waitForever();
         Promise promise2 = waitForever();
@@ -504,12 +513,15 @@ public class PromiseTest extends TestCase {
         Promise allPromise = Promise.all(promise1, promise2, promise3);
         Promise handlerPromise = allPromise.then(new PromiseHandler<Object[]>() {
             @Override
-            public void onCancel() {
-                handlerCalled[0] = true;
+            public Object onError(Throwable thr) throws Throwable {
+                if (Promise.isCancelled(thr)) {
+                    handledCancel[0] = true;
+                }
+                throw thr;
             }
         });
 
-        assertFalse(handlerCalled[0]);
+        assertFalse(handledCancel[0]);
         assertFalse(promise1.isFinished());
         assertFalse(promise2.isFinished());
         assertFalse(promise3.isFinished());
@@ -518,7 +530,7 @@ public class PromiseTest extends TestCase {
 
         promise2.cancel();
 
-        assertTrue(handlerCalled[0]);
+        assertTrue(handledCancel[0]);
         assertFalse(promise1.isFinished());
         assertTrue(promise2.isCancelled());
         assertFalse(promise3.isFinished());
@@ -532,7 +544,7 @@ public class PromiseTest extends TestCase {
     }
 
     private void doTestAllCancelBackward(boolean wholeChain) {
-        final boolean[] handlerCalled = new boolean[] { false };
+        final boolean[] handledCancel = new boolean[] { false };
 
         Promise promise1 = waitForever();
         Promise promise2 = waitForever();
@@ -540,14 +552,17 @@ public class PromiseTest extends TestCase {
         Promise allPromise = Promise.all(promise1, promise2, promise3);
         Promise handlerPromise = allPromise.then(new PromiseHandler<Object[]>() {
             @Override
-            public void onCancel() {
-                handlerCalled[0] = true;
+            public Object onError(Throwable thr) throws Throwable {
+                if (Promise.isCancelled(thr)) {
+                    handledCancel[0] = true;
+                }
+                return null;
             }
         });
         Promise lastPromise = handlerPromise.then(new PromiseHandler<Object>() {
         });
 
-        assertFalse(handlerCalled[0]);
+        assertFalse(handledCancel[0]);
         assertFalse(promise1.isFinished());
         assertFalse(promise2.isFinished());
         assertFalse(promise3.isFinished());
@@ -557,7 +572,7 @@ public class PromiseTest extends TestCase {
 
         lastPromise.cancel(wholeChain);
 
-        assertEquals(wholeChain, handlerCalled[0]);
+        assertEquals(wholeChain, handledCancel[0]);
         assertEquals(wholeChain, promise1.isCancelled());
         assertEquals(wholeChain, promise2.isCancelled());
         assertEquals(wholeChain, promise3.isCancelled());

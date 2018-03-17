@@ -32,9 +32,6 @@ public abstract class PromiseHandler<InputType> {
         throw thr;
     }
 
-    public void onCancel() {
-    }
-
     public void onFinally() {
     }
 

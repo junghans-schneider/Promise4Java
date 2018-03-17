@@ -28,7 +28,7 @@ public abstract class Promise {
         public boolean isCancelled();
     }
 
-    protected static enum State { QUEUED, EXECUTING, PENDING, DONE, FAILED, CANCELLED };
+    protected static enum State { QUEUED, EXECUTING, PENDING, DONE, FAILED };
 
     protected static PromiseHandler<?> mFallbackErrorHandler;
 
@@ -60,11 +60,15 @@ public abstract class Promise {
     protected abstract void execute(Resolver resolver);
 
     public boolean isFinished() {
-        return mState == State.DONE || mState == State.FAILED || mState == State.CANCELLED;
+        return mState == State.DONE || mState == State.FAILED;
     }
 
     public boolean isCancelled() {
-        return mState == State.CANCELLED;
+        return isCancelled(mFailCause);
+    }
+
+    public static boolean isCancelled(Throwable thr) {
+        return thr instanceof CancellationException;
     }
 
     public Promise then(PromiseHandler<?> handler) {
@@ -103,42 +107,6 @@ public abstract class Promise {
 
         handle(mFallbackErrorHandler);
         return this;
-    }
-
-    public boolean cancel() {
-        return cancel(false);
-    }
-
-    /**
-     * Tries to cancel the promise.
-     *
-     * @param wholeChain if true all parent promises having will be cancelled as well unless they have other uncancelled
-     *        child promises.
-     * @return whether the promise could be cancelled (= whether it hasn't settled before)
-     */
-    public boolean cancel(boolean wholeChain) {
-        synchronized(this) {
-            if (isFinished()) {
-                return false;
-            }
-            mState = State.CANCELLED;
-
-            if (wholeChain && (mAncestorPromises != null)) {
-                for (WeakReference<Promise> promiseRef : mAncestorPromises) {
-                    Promise promise = promiseRef.get();
-                    if (promise != null) {
-                        promise.cancel(true);
-                    }
-                }
-            }
-            mAncestorPromises = null;
-
-            this.notifyAll();
-        }
-
-        fireFinished();
-
-        return true;
     }
 
     protected void addAncestor(Promise ancestor) {
@@ -183,10 +151,6 @@ public abstract class Promise {
                     resolveFail(thr);
                     return null;
                 }
-                @Override
-                public void onCancel() {
-                    cancel();
-                }
             });
         }
     }
@@ -210,12 +174,49 @@ public abstract class Promise {
         }
     }
 
+    public boolean cancel() {
+        return cancel(false);
+    }
+
+    /**
+     * Tries to cancel the promise.
+     *
+     * @param wholeChain if true all parent promises having will be cancelled as well unless they have other uncancelled
+     *        child promises.
+     * @return whether the promise could be cancelled (= whether it hasn't settled before)
+     */
+    public boolean cancel(boolean wholeChain) {
+        synchronized(this) {
+            if (isFinished()) {
+                return false;
+            }
+            mState = State.FAILED;
+            mFailCause = new CancellationException("Promise was cancelled");
+
+            if (wholeChain && (mAncestorPromises != null)) {
+                for (WeakReference<Promise> promiseRef : mAncestorPromises) {
+                    Promise promise = promiseRef.get();
+                    if (promise != null) {
+                        promise.cancel(true);
+                    }
+                }
+            }
+
+            this.notifyAll();
+        }
+
+        fireFinished();
+
+        return true;
+    }
+
     protected void fireFinished() {
         assertFinished();
         List<PromiseHandler<?>> handlers;
         synchronized(this) {
             handlers = mHandlers;
             mHandlers = null;
+            mAncestorPromises = null;
         }
 
         if (handlers != null) {
@@ -251,12 +252,6 @@ public abstract class Promise {
             }
         } else if (state == State.FAILED) {
             fireError(handler, mFailCause);
-        } else if (state == State.CANCELLED) {
-            try {
-                handler.onCancel();
-            } catch (Throwable thr) {
-                fireError(handler, new Exception("Calling onCancel handler failed", thr));
-            }
         } else {
             fireError(handler, new IllegalStateException("Expected finished state, not " + mState));
         }
@@ -324,8 +319,6 @@ public abstract class Promise {
             } else {
                 throw (Exception) mFailCause;
             }
-        } else if (mState == State.CANCELLED) {
-            throw new CancellationException("Promise was cancelled");
         } else {
             throw new IllegalStateException("Expected settled state, but state is " + mState);
         }
@@ -462,22 +455,6 @@ public abstract class Promise {
         }
 
         @Override
-        public void onCancel() {
-            try {
-                mNestedHandler.onCancel();
-                if (mPromise != null) {
-                    mPromise.cancel();
-                }
-            } catch (Throwable thr) {
-                if (mPromise != null) {
-                    mPromise.resolveFail(thr);
-                } else {
-                    onFallbackError("Calling onCancel handler failed", thr);
-                }
-            }
-        }
-
-        @Override
         public void onFinally() {
             try {
                 mNestedHandler.onFinally();
@@ -546,10 +523,6 @@ public abstract class Promise {
                 public Object onError(Throwable thr) throws Throwable {
                     resolveFail(thr);
                     return null;
-                }
-                @Override
-                public void onCancel() {
-                    cancel();
                 }
             });
         }

@@ -6,7 +6,6 @@
 
 package de.junghansschneider.promise;
 
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.Executor;
 
 public class Deferred implements Promise.Resolver {
@@ -45,12 +44,6 @@ public class Deferred implements Promise.Resolver {
 
     public boolean isCancelled() {
         return mPromise.isCancelled();
-    }
-
-    public void assertNotCancelled() {
-        if (isCancelled()) {
-            throw new CancellationException();
-        }
     }
 
 }
