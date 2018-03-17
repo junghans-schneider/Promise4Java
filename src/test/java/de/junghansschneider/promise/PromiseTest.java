@@ -41,7 +41,7 @@ public class PromiseTest extends TestCase {
         Promise promise = new Promise() {
             @Override
             protected void execute(Promise.Resolver resolver) {
-                resolver.done(1234);
+                resolver.resolve(1234);
             }
         }.then(new PromiseHandler<Integer>() {
             @Override
@@ -50,7 +50,7 @@ public class PromiseTest extends TestCase {
                 return new Promise() {
                     @Override
                     protected void execute(Promise.Resolver resolver) {
-                        resolver.done("Hallo");
+                        resolver.resolve("Hallo");
                     }
                 };
             }
@@ -105,7 +105,7 @@ public class PromiseTest extends TestCase {
             protected void execute(Promise.Resolver resolver) {
                 // Load file in background thread
                 String content = null;
-                resolver.done(content);
+                resolver.resolve(content);
             }
         }.handle(new PromiseHandler<String>(guiExecutor) {
             @Override
@@ -128,7 +128,7 @@ public class PromiseTest extends TestCase {
             protected void execute(Promise.Resolver resolver) {
                 assertFalse(handlerCalled[1]);
                 handlerCalled[0] = true;
-                resolver.done(1234);
+                resolver.resolve(1234);
             }
         }.then(new PromiseHandler<Integer>() {
             @Override
@@ -152,13 +152,13 @@ public class PromiseTest extends TestCase {
         Promise promise = new Promise() {
             @Override
             protected void execute(Promise.Resolver resolver) {
-                resolver.done(new Promise() {
+                resolver.resolve(new Promise() {
                     @Override
                     protected void execute(Promise.Resolver resolver) {
-                        resolver.done(new Promise() {
+                        resolver.resolve(new Promise() {
                             @Override
                             protected void execute(Promise.Resolver resolver) {
-                                resolver.done(1234);
+                                resolver.resolve(1234);
                             }
                         });
                     }
@@ -213,10 +213,10 @@ public class PromiseTest extends TestCase {
         Promise promise = new Promise() {
             @Override
             protected void execute(Promise.Resolver resolver) {
-                resolver.done(new Promise() {
+                resolver.resolve(new Promise() {
                     @Override
                     protected void execute(Promise.Resolver resolver) {
-                        resolver.done(new Promise() {
+                        resolver.resolve(new Promise() {
                             @Override
                             protected void execute(Promise.Resolver resolver) {
                                 throw new IllegalStateException("Test");
@@ -284,11 +284,11 @@ public class PromiseTest extends TestCase {
                         Promise promise = waitForever();
                         waitPromise[0] = promise;
                         promises.add(promise);
-                        resolver.done(promise);
+                        resolver.resolve(promise);
                     }
                 };
                 promises.add(promise);
-                resolver.done(promise);
+                resolver.resolve(promise);
             }
         };
         promises.add(outerPromise);
@@ -339,11 +339,11 @@ public class PromiseTest extends TestCase {
                     protected void execute(Promise.Resolver resolver) {
                         Promise promise = waitForever();
                         promises.add(promise);
-                        resolver.done(promise);
+                        resolver.resolve(promise);
                     }
                 };
                 promises.add(promise);
-                resolver.done(promise);
+                resolver.resolve(promise);
             }
         };
         promises.add(outerPromise);
@@ -411,7 +411,7 @@ public class PromiseTest extends TestCase {
         assertTrue(handlerCalled[0]);
     }
 
-    public void testAllDone() throws Exception {
+    public void testAllResolved() throws Exception {
         final boolean[] handlerCalled = new boolean[] { false };
 
         final Thread mainThread = Thread.currentThread();
@@ -426,7 +426,7 @@ public class PromiseTest extends TestCase {
                     Thread.sleep(50);
                 } catch (InterruptedException exc) {
                 }
-                resolver.done("Bla");
+                resolver.resolve("Bla");
             }
         };
         Promise promise3 = new Promise(bgExecutor) {
@@ -437,7 +437,7 @@ public class PromiseTest extends TestCase {
                     Thread.sleep(10);
                 } catch (InterruptedException exc) {
                 }
-                resolver.done(false);
+                resolver.resolve(false);
             }
         };
 
@@ -485,7 +485,7 @@ public class PromiseTest extends TestCase {
                     Thread.sleep(10);
                 } catch (InterruptedException exc) {
                 }
-                resolver.done(false);
+                resolver.resolve(false);
             }
         };
 
@@ -595,7 +595,7 @@ public class PromiseTest extends TestCase {
             @Override
             protected void execute(Resolver resolver) {
                 List<Object> parkingList = Arrays.asList(new Object[radius]);
-                resolver.done(parkingList);
+                resolver.resolve(parkingList);
             }
         }.then(new PromiseHandler<List<Object>>() {
             @Override

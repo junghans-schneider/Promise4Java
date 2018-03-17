@@ -34,12 +34,12 @@ public class Deferred implements Promise.Resolver {
         return mPromise;
     }
 
-    public void done(Object value) {
-        mResolver.done(value);
+    public void resolve(Object value) {
+        mResolver.resolve(value);
     }
 
-    public void fail(Throwable thr) {
-        mResolver.fail(thr);
+    public void reject(Throwable thr) {
+        mResolver.reject(thr);
     }
 
     public boolean isCancelled() {

@@ -23,19 +23,19 @@ import java.util.concurrent.TimeoutException;
 public abstract class Promise {
 
     public interface Resolver {
-        public void done(Object value);
-        public void fail(Throwable thr);
+        public void resolve(Object value);
+        public void reject(Throwable thr);
         public boolean isCancelled();
     }
 
-    protected static enum State { QUEUED, EXECUTING, PENDING, DONE, FAILED };
+    protected static enum State { QUEUED, EXECUTING, PENDING, RESOLVED, REJECTED};
 
     protected static PromiseHandler<?> mFallbackErrorHandler;
 
 
     protected State mState = State.QUEUED;
     protected Object mValue;
-    protected Throwable mFailCause;
+    protected Throwable mRejectCause;
     protected List<WeakReference<Promise>> mAncestorPromises;
     protected List<PromiseHandler<?>> mHandlers;
 
@@ -60,11 +60,11 @@ public abstract class Promise {
     protected abstract void execute(Resolver resolver);
 
     public boolean isFinished() {
-        return mState == State.DONE || mState == State.FAILED;
+        return mState == State.RESOLVED || mState == State.REJECTED;
     }
 
     public boolean isCancelled() {
-        return isCancelled(mFailCause);
+        return isCancelled(mRejectCause);
     }
 
     public static boolean isCancelled(Throwable thr) {
@@ -121,7 +121,7 @@ public abstract class Promise {
         }
     }
 
-    protected void resolveDone(Object value) {
+    protected void resolve(Object value) {
         Promise nestedPromise = null;
         synchronized(this) {
             if (isFinished()) {
@@ -131,7 +131,7 @@ public abstract class Promise {
                 nestedPromise = (Promise) value;
                 addAncestor(nestedPromise);
             } else {
-                mState = State.DONE;
+                mState = State.RESOLVED;
                 mValue = value;
                 this.notifyAll();
             }
@@ -143,25 +143,25 @@ public abstract class Promise {
             nestedPromise.handle(new PromiseHandler<Object>() {
                 @Override
                 public Object onValue(Object value) throws Exception {
-                    resolveDone(value);
+                    resolve(value);
                     return null;
                 }
                 @Override
                 public Object onError(Throwable thr) throws Throwable {
-                    resolveFail(thr);
+                    reject(thr);
                     return null;
                 }
             });
         }
     }
 
-    protected void resolveFail(Throwable thr) {
+    protected void reject(Throwable thr) {
         boolean alreadyFinished;
         synchronized(this) {
             alreadyFinished = isFinished();
             if (! alreadyFinished) {
-                mState = State.FAILED;
-                mFailCause = thr;
+                mState = State.REJECTED;
+                mRejectCause = thr;
                 this.notifyAll();
             }
         }
@@ -190,8 +190,8 @@ public abstract class Promise {
             if (isFinished()) {
                 return false;
             }
-            mState = State.FAILED;
-            mFailCause = new CancellationException("Promise was cancelled");
+            mState = State.REJECTED;
+            mRejectCause = new CancellationException("Promise was cancelled");
 
             if (wholeChain && (mAncestorPromises != null)) {
                 for (WeakReference<Promise> promiseRef : mAncestorPromises) {
@@ -242,16 +242,16 @@ public abstract class Promise {
 
     private void doFireFinished(PromiseHandler<?> handler) {
         State state = mState;
-        if (state == State.DONE) {
+        if (state == State.RESOLVED) {
             try {
                 @SuppressWarnings("unchecked")
                 Object ownValue = ((PromiseHandler<Object>) handler).onValue(mValue);
-                resolveDone(ownValue);
+                resolve(ownValue);
             } catch (Throwable thr) {
                 fireError(handler, new Exception("Calling onValue handler failed", thr));
             }
-        } else if (state == State.FAILED) {
-            fireError(handler, mFailCause);
+        } else if (state == State.REJECTED) {
+            fireError(handler, mRejectCause);
         } else {
             fireError(handler, new IllegalStateException("Expected finished state, not " + mState));
         }
@@ -311,13 +311,13 @@ public abstract class Promise {
             }
         }
 
-        if (mState == State.DONE) {
+        if (mState == State.RESOLVED) {
             return mValue;
-        } else if (mState == State.FAILED) {
-            if (mFailCause instanceof Error) {
-                throw (Error) mFailCause;
+        } else if (mState == State.REJECTED) {
+            if (mRejectCause instanceof Error) {
+                throw (Error) mRejectCause;
             } else {
-                throw (Exception) mFailCause;
+                throw (Exception) mRejectCause;
             }
         } else {
             throw new IllegalStateException("Expected settled state, but state is " + mState);
@@ -362,11 +362,11 @@ public abstract class Promise {
             }
 
             Resolver resolver = new Resolver() {
-                public void done(Object value) {
-                    resolveDone(value);
+                public void resolve(Object value) {
+                    Promise.this.resolve(value);
                 }
-                public void fail(Throwable thr) {
-                    resolveFail(thr);
+                public void reject(Throwable thr) {
+                    Promise.this.reject(thr);
                 }
                 public boolean isCancelled() {
                     return Promise.this.isCancelled();
@@ -381,7 +381,7 @@ public abstract class Promise {
                 }
             }
         } catch (Throwable thr) {
-            resolveFail(thr);
+            reject(thr);
         }
     }
 
@@ -390,7 +390,7 @@ public abstract class Promise {
 
         FinishedPromise(Object value) {
             super(null, false);
-            resolveDone(value);
+            resolve(value);
         }
 
         @Override
@@ -425,11 +425,11 @@ public abstract class Promise {
                 @SuppressWarnings("unchecked")
                 Object nestedValue = ((PromiseHandler<Object>) mNestedHandler).onValue(value);
                 if (mPromise != null) {
-                    mPromise.resolveDone(nestedValue);
+                    mPromise.resolve(nestedValue);
                 }
             } catch (Throwable thr) {
                 if (mPromise != null) {
-                    mPromise.resolveFail(thr);
+                    mPromise.reject(thr);
                 } else {
                     throw thr;
                 }
@@ -442,11 +442,11 @@ public abstract class Promise {
             try {
                 Object nestedValue = mNestedHandler.onError(cause);
                 if (mPromise != null) {
-                    mPromise.resolveDone(nestedValue);
+                    mPromise.resolve(nestedValue);
                 }
             } catch (Throwable thr) {
                 if (mPromise != null) {
-                    mPromise.resolveFail(thr);
+                    mPromise.reject(thr);
                 } else {
                     throw thr;
                 }
@@ -460,7 +460,7 @@ public abstract class Promise {
                 mNestedHandler.onFinally();
             } catch (Throwable thr) {
                 if (mPromise != null) {
-                    mPromise.resolveFail(thr);
+                    mPromise.reject(thr);
                 } else {
                     onFallbackError("Calling onFinally handler failed", thr);
                 }
@@ -496,7 +496,7 @@ public abstract class Promise {
             }
 
             if (mPendingHandlerCount == 0) {
-                resolveDone(mGatheredValues);
+                resolve(mGatheredValues);
             }
         }
 
@@ -514,14 +514,14 @@ public abstract class Promise {
                         finished = (mPendingHandlerCount == 0);
                     }
                     if (finished) {
-                        resolveDone(mGatheredValues);
+                        resolve(mGatheredValues);
                     }
 
                     return null;
                 }
                 @Override
                 public Object onError(Throwable thr) throws Throwable {
-                    resolveFail(thr);
+                    reject(thr);
                     return null;
                 }
             });
