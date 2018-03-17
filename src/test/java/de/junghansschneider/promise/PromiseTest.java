@@ -137,7 +137,7 @@ public class PromiseTest extends TestCase {
                 return "my-result";
             }
             @Override
-            public void onFinally() {
+            public void always() {
                 assertTrue(handlerCalled[0]);
                 handlerCalled[1] = true;
             }
@@ -198,7 +198,7 @@ public class PromiseTest extends TestCase {
                 return "my-result";
             }
             @Override
-            public void onFinally() {
+            public void always() {
                 assertTrue(handlerCalled[0]);
                 handlerCalled[1] = true;
             }
@@ -259,7 +259,7 @@ public class PromiseTest extends TestCase {
                 return null;
             }
             @Override
-            public void onFinally() {
+            public void always() {
                 assertTrue(handlerCalled[0]);
                 handlerCalled[1] = true;
             }

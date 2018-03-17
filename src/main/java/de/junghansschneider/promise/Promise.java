@@ -257,9 +257,9 @@ public abstract class Promise {
         }
 
         try {
-            handler.onFinally();
+            handler.always();
         } catch (Throwable thr) {
-            fireError(handler, new Exception("Calling onFinally handler failed", thr));
+            fireError(handler, new Exception("Calling always handler failed", thr));
         }
     }
 
@@ -455,14 +455,14 @@ public abstract class Promise {
         }
 
         @Override
-        public void onFinally() {
+        public void always() {
             try {
-                mNestedHandler.onFinally();
+                mNestedHandler.always();
             } catch (Throwable thr) {
                 if (mPromise != null) {
                     mPromise.reject(thr);
                 } else {
-                    onFallbackError("Calling onFinally handler failed", thr);
+                    onFallbackError("Calling always handler failed", thr);
                 }
             }
         }

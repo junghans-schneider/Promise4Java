@@ -32,7 +32,7 @@ public abstract class PromiseHandler<InputType> {
         throw thr;
     }
 
-    public void onFinally() {
+    public void always() {
     }
 
 }
