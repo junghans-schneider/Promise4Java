@@ -98,7 +98,7 @@ public class PromiseTest extends TestCase {
 
         // Executors
         Executor backgroundExecutor = null;
-        Executor guiExecutor = null;
+        Executor uiExecutor = null;
 
         new Promise(backgroundExecutor) {
             @Override
@@ -107,15 +107,15 @@ public class PromiseTest extends TestCase {
                 String content = null;
                 resolver.resolve(content);
             }
-        }.handle(new PromiseHandler<String>(guiExecutor) {
+        }.handle(uiExecutor, new PromiseHandler<String>() {
             @Override
             public Object onValue(String value) {
-                // Show result in GUI
+                // Show result in UI
                 return null;
             }
             @Override
             public Object onError(Throwable thr) {
-                // Show error in GUI
+                // Show error in UI
                 return null;
             }
         });
@@ -377,6 +377,71 @@ public class PromiseTest extends TestCase {
             assertEquals(expectCancelled, promise.isFinished());
             assertEquals(expectCancelled, promise.isCancelled());
         }
+    }
+
+    public void testExecutors() {
+        ExecutorService uiExecutor = Executors.newSingleThreadExecutor();
+        uiExecutor.execute(new Runnable() {
+            public void run() {
+                Thread.currentThread().setName("test-ui");
+            }
+        });
+
+        ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor();
+        backgroundExecutor.execute(new Runnable() {
+            public void run() {
+                Thread.currentThread().setName("test-background");
+            }
+        });
+
+        final boolean[] wasRightExecutor = new boolean[] { false, false, false, false, false };
+
+        Promise promise =
+                new Promise(uiExecutor) {
+                    @Override
+                    protected void execute(Resolver resolver) {
+                        wasRightExecutor[0] = Thread.currentThread().getName().equals("test-ui");
+                        resolver.resolve(1);
+                    }
+                }
+                .then(backgroundExecutor, new PromiseHandler<Object>() {
+                    public Object onValue(Object value) throws Throwable {
+                        wasRightExecutor[1] = Thread.currentThread().getName().equals("test-background");
+                        return null;
+                    }
+                })
+                .then(backgroundExecutor, new PromiseHandler<Object>() {
+                    public Object onValue(Object value) throws Throwable {
+                        wasRightExecutor[2] = Thread.currentThread().getName().equals("test-background");
+                        throw new Exception("Test exception");
+                    }
+                })
+                .then(uiExecutor, new PromiseHandler<Object>() {
+                    public Object onError(Throwable thr) throws Throwable {
+                        wasRightExecutor[3] = Thread.currentThread().getName().equals("test-ui");
+                        throw thr;
+                    }
+
+                    public void always() {
+                        wasRightExecutor[4] = Thread.currentThread().getName().equals("test-ui");
+                    }
+                });
+
+        try {
+            promise.waitForResult();
+            fail("Exception expected");
+        } catch (Exception exc) {
+            assertEquals("Test exception", exc.getMessage());
+        }
+
+        assertTrue(wasRightExecutor[0]);
+        assertTrue(wasRightExecutor[1]);
+        assertTrue(wasRightExecutor[2]);
+        assertTrue(wasRightExecutor[3]);
+        assertTrue(wasRightExecutor[4]);
+
+        uiExecutor.shutdown();
+        backgroundExecutor.shutdown();
     }
 
     public void testAllEmpty() {

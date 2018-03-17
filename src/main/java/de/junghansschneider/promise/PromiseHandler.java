@@ -6,23 +6,7 @@
 
 package de.junghansschneider.promise;
 
-import java.util.concurrent.Executor;
-
 public abstract class PromiseHandler<InputType> {
-
-    private Executor mExecutor;
-
-
-    public PromiseHandler() {
-    }
-
-    public PromiseHandler(Executor executor) {
-        mExecutor = executor;
-    }
-
-    public Executor getExecutor() {
-        return mExecutor;
-    }
 
     public Object onValue(InputType value) throws Throwable {
         return value;

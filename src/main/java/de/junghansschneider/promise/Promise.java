@@ -28,16 +28,32 @@ public abstract class Promise {
         public boolean isCancelled();
     }
 
+    private static class PromiseHandlerSubscription {
+        PromiseHandlerSubscription(Executor executor, PromiseHandler<?> handler) {
+            if (handler == null) {
+                throw new NullPointerException("handler is null");
+            }
+
+            this.executor = executor;
+            this.handler = handler;
+        }
+
+        Executor executor;
+        PromiseHandler<?> handler;
+    }
+
+
     protected static enum State { QUEUED, EXECUTING, PENDING, RESOLVED, REJECTED};
 
-    protected static PromiseHandler<?> mFallbackErrorHandler;
+    protected static PromiseHandlerSubscription mFallbackErrorHandler;
 
 
     protected State mState = State.QUEUED;
     protected Object mValue;
     protected Throwable mRejectCause;
     protected List<WeakReference<Promise>> mAncestorPromises;
-    protected List<PromiseHandler<?>> mHandlers;
+    protected List<PromiseHandlerSubscription> mHandlers;
+
 
     public Promise() {
         this(null, true);
@@ -54,7 +70,11 @@ public abstract class Promise {
     }
 
     public static void setFallbackErrorHandler(PromiseHandler<?> fallbackErrorHandler) {
-        mFallbackErrorHandler = fallbackErrorHandler;
+        setFallbackErrorHandler(null, fallbackErrorHandler);
+    }
+
+    public static void setFallbackErrorHandler(Executor executor, PromiseHandler<?> fallbackErrorHandler) {
+        mFallbackErrorHandler = new PromiseHandlerSubscription(executor, fallbackErrorHandler);
     }
 
     protected abstract void execute(Resolver resolver);
@@ -72,24 +92,32 @@ public abstract class Promise {
     }
 
     public Promise then(PromiseHandler<?> handler) {
+        return then(null, handler);
+    }
+
+    public Promise then(Executor executor, PromiseHandler<?> handler) {
         WrapperHandler wrapperHandler = new WrapperHandler(handler);
         Promise chainedPromise = wrapperHandler.getPromise();
         chainedPromise.addAncestor(this);
 
-        handle(wrapperHandler);
+        handle(executor, wrapperHandler);
 
         return chainedPromise;
     }
 
     public Promise handle(PromiseHandler<?> handler) {
+        return this.handle(null, handler);
+    }
+
+    public Promise handle(Executor executor, PromiseHandler<?> handler) {
         synchronized(this) {
             if (isFinished()) {
-                fireFinished(handler);
+                fireFinished(executor, handler);
             } else {
                 if (mHandlers == null) {
-                    mHandlers = new ArrayList<PromiseHandler<?>>(1);
+                    mHandlers = new ArrayList<PromiseHandlerSubscription>(1);
                 }
-                mHandlers.add(handler);
+                mHandlers.add(new PromiseHandlerSubscription(executor, handler));
             }
         }
         return this;
@@ -97,15 +125,17 @@ public abstract class Promise {
 
     public Promise end() {
         if (mFallbackErrorHandler == null) {
-            mFallbackErrorHandler = new PromiseHandler<Void>() {
-                public Object onError(Throwable thr) throws Throwable {
-                    onFallbackError("Error at the end of a promise chain", thr);
-                    return null;
-                }
-            };
+            mFallbackErrorHandler = new PromiseHandlerSubscription(
+                    null,
+                    new PromiseHandler<Void>() {
+                        public Object onError(Throwable thr) throws Throwable {
+                            onFallbackError("Error at the end of a promise chain", thr);
+                            return null;
+                        }
+                    });
         }
 
-        handle(mFallbackErrorHandler);
+        handle(mFallbackErrorHandler.executor, mFallbackErrorHandler.handler);
         return this;
     }
 
@@ -212,7 +242,7 @@ public abstract class Promise {
 
     protected void fireFinished() {
         assertFinished();
-        List<PromiseHandler<?>> handlers;
+        List<PromiseHandlerSubscription> handlers;
         synchronized(this) {
             handlers = mHandlers;
             mHandlers = null;
@@ -220,15 +250,13 @@ public abstract class Promise {
         }
 
         if (handlers != null) {
-            for (PromiseHandler<?> handler : handlers) {
-                fireFinished(handler);
+            for (PromiseHandlerSubscription subscription : handlers) {
+                fireFinished(subscription.executor, subscription.handler);
             }
         }
     }
 
-    protected void fireFinished(final PromiseHandler<?> handler) {
-        Executor executor = handler.getExecutor();
-
+    protected void fireFinished(Executor executor, final PromiseHandler<?> handler) {
         if (executor == null) {
             doFireFinished(handler);
         } else {
