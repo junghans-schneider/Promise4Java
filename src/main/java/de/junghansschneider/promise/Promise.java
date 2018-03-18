@@ -28,8 +28,8 @@ public abstract class Promise {
         public boolean isCancelled();
     }
 
-    private static class PromiseHandlerSubscription {
-        PromiseHandlerSubscription(Executor executor, PromiseHandler<?> handler) {
+    private static class Subscription<HandlerType> {
+        Subscription(Executor executor, HandlerType handler) {
             if (handler == null) {
                 throw new NullPointerException("handler is null");
             }
@@ -39,20 +39,22 @@ public abstract class Promise {
         }
 
         Executor executor;
-        PromiseHandler<?> handler;
+        HandlerType handler;
     }
 
 
     protected static enum State { QUEUED, EXECUTING, PENDING, RESOLVED, REJECTED};
 
-    protected static PromiseHandlerSubscription mFallbackErrorHandler;
+    protected static Subscription<PromiseErrorHandler> mFallbackErrorHandler;
 
 
     protected State mState = State.QUEUED;
     protected Object mValue;
     protected Throwable mRejectCause;
     protected List<WeakReference<Promise>> mAncestorPromises;
-    protected List<PromiseHandlerSubscription> mHandlers;
+    protected List<Subscription<PromiseValueHandler<?>>> mValueHandlers;
+    protected List<Subscription<PromiseErrorHandler>> mErrorHandlers;
+    protected List<Subscription<Runnable>> mAlwaysHandlers;
 
 
     public Promise() {
@@ -69,12 +71,12 @@ public abstract class Promise {
         }
     }
 
-    public static void setFallbackErrorHandler(PromiseHandler<?> fallbackErrorHandler) {
+    public static void setFallbackErrorHandler(PromiseErrorHandler fallbackErrorHandler) {
         setFallbackErrorHandler(null, fallbackErrorHandler);
     }
 
-    public static void setFallbackErrorHandler(Executor executor, PromiseHandler<?> fallbackErrorHandler) {
-        mFallbackErrorHandler = new PromiseHandlerSubscription(executor, fallbackErrorHandler);
+    public static void setFallbackErrorHandler(Executor executor, PromiseErrorHandler fallbackErrorHandler) {
+        mFallbackErrorHandler = new Subscription<PromiseErrorHandler>(executor, fallbackErrorHandler);
     }
 
     protected abstract void execute(Resolver resolver);
@@ -91,33 +93,74 @@ public abstract class Promise {
         return thr instanceof CancellationException;
     }
 
-    public Promise then(PromiseHandler<?> handler) {
+    public Promise onValue(PromiseValueHandler<?> handler) {
+        return this.onValue(null, handler);
+    }
+
+    public Promise onValue(Executor executor, PromiseValueHandler<?> handler) {
+        synchronized(this) {
+            if (isFinished()) {
+                if (mState == State.RESOLVED) {
+                    fireValue(executor, handler);
+                }
+            } else {
+                if (mValueHandlers == null) {
+                    mValueHandlers = new ArrayList<Subscription<PromiseValueHandler<?>>>(1);
+                }
+                mValueHandlers.add(new Subscription<PromiseValueHandler<?>>(executor, handler));
+            }
+        }
+        return this;
+    }
+
+    public Promise then(PromiseThenHandler<?> handler) {
         return then(null, handler);
     }
 
-    public Promise then(Executor executor, PromiseHandler<?> handler) {
-        WrapperHandler wrapperHandler = new WrapperHandler(handler);
+    public Promise then(Executor executor, PromiseThenHandler<?> handler) {
+        ThenWrapperHandler wrapperHandler = new ThenWrapperHandler(handler);
         Promise chainedPromise = wrapperHandler.getPromise();
         chainedPromise.addAncestor(this);
 
-        handle(executor, wrapperHandler);
+        onValue(executor, wrapperHandler);
+        onError(executor, wrapperHandler);
 
         return chainedPromise;
     }
 
-    public Promise handle(PromiseHandler<?> handler) {
-        return this.handle(null, handler);
+    public Promise onError(PromiseErrorHandler handler) {
+        return this.onError(null, handler);
     }
 
-    public Promise handle(Executor executor, PromiseHandler<?> handler) {
+    public Promise onError(Executor executor, PromiseErrorHandler handler) {
         synchronized(this) {
             if (isFinished()) {
-                fireFinished(executor, handler);
-            } else {
-                if (mHandlers == null) {
-                    mHandlers = new ArrayList<PromiseHandlerSubscription>(1);
+                if (mState == State.REJECTED) {
+                    fireError(executor, handler);
                 }
-                mHandlers.add(new PromiseHandlerSubscription(executor, handler));
+            } else {
+                if (mErrorHandlers == null) {
+                    mErrorHandlers = new ArrayList<Subscription<PromiseErrorHandler>>(1);
+                }
+                mErrorHandlers.add(new Subscription<PromiseErrorHandler>(executor, handler));
+            }
+        }
+        return this;
+    }
+
+    public Promise always(Runnable handler) {
+        return this.always(null, handler);
+    }
+
+    public Promise always(Executor executor, Runnable handler) {
+        synchronized(this) {
+            if (isFinished()) {
+                fireAlways(executor, handler);
+            } else {
+                if (mAlwaysHandlers == null) {
+                    mAlwaysHandlers = new ArrayList<Subscription<Runnable>>(1);
+                }
+                mAlwaysHandlers.add(new Subscription<Runnable>(executor, handler));
             }
         }
         return this;
@@ -125,17 +168,16 @@ public abstract class Promise {
 
     public Promise end() {
         if (mFallbackErrorHandler == null) {
-            mFallbackErrorHandler = new PromiseHandlerSubscription(
+            mFallbackErrorHandler = new Subscription<PromiseErrorHandler>(
                     null,
-                    new PromiseHandler<Void>() {
-                        public Object onError(Throwable thr) throws Throwable {
+                    new PromiseErrorHandler() {
+                        public void onError(Throwable thr) {
                             onFallbackError("Error at the end of a promise chain", thr);
-                            return null;
                         }
                     });
         }
 
-        handle(mFallbackErrorHandler.executor, mFallbackErrorHandler.handler);
+        onError(mFallbackErrorHandler.executor, mFallbackErrorHandler.handler);
         return this;
     }
 
@@ -170,18 +212,19 @@ public abstract class Promise {
         if (nestedPromise == null) {
             fireFinished();
         } else {
-            nestedPromise.handle(new PromiseHandler<Object>() {
-                @Override
-                public Object onValue(Object value) throws Exception {
-                    resolve(value);
-                    return null;
-                }
-                @Override
-                public Object onError(Throwable thr) throws Throwable {
-                    reject(thr);
-                    return null;
-                }
-            });
+            nestedPromise
+                    .onValue(new PromiseValueHandler<Object>() {
+                        @Override
+                        public void onValue(Object value) {
+                            resolve(value);
+                        }
+                    })
+                    .onError(new PromiseErrorHandler() {
+                        @Override
+                        public void onError(Throwable thr) {
+                            reject(thr);
+                        }
+                    });
         }
     }
 
@@ -196,7 +239,7 @@ public abstract class Promise {
             }
         }
 
-        if (alreadyFinished && ! (thr instanceof CancellationException)) {
+        if (alreadyFinished && !isCancelled (thr)) {
             onFallbackError("Catched error after promise was finished", thr);
         } else {
             // TODO: Fallback-handle unhandled errors (Problem: error handlers may be called asynchronously in Executor)
@@ -242,66 +285,124 @@ public abstract class Promise {
 
     protected void fireFinished() {
         assertFinished();
-        List<PromiseHandlerSubscription> handlers;
+
+        State state;
+        List<Subscription<PromiseValueHandler<?>>> valueHandlers;
+        List<Subscription<PromiseErrorHandler>> errorHandlers;
+        List<Subscription<Runnable>> alwaysHandlers;
         synchronized(this) {
-            handlers = mHandlers;
-            mHandlers = null;
+            state = mState;
+            valueHandlers     = mValueHandlers;
+            errorHandlers     = mErrorHandlers;
+            alwaysHandlers    = mAlwaysHandlers;
+            mValueHandlers    = null;
+            mErrorHandlers    = null;
+            mAlwaysHandlers   = null;
             mAncestorPromises = null;
         }
 
-        if (handlers != null) {
-            for (PromiseHandlerSubscription subscription : handlers) {
-                fireFinished(subscription.executor, subscription.handler);
+        if (state == State.RESOLVED) {
+            if (valueHandlers != null) {
+                for (Subscription<PromiseValueHandler<?>> subscription : valueHandlers) {
+                    fireValue(subscription.executor, subscription.handler);
+                }
+            }
+        } else if (state == State.REJECTED) {
+            if (errorHandlers != null) {
+                for (Subscription<PromiseErrorHandler> subscription : errorHandlers) {
+                    fireError(subscription.executor, subscription.handler);
+                }
+            }
+        } else {
+            onFallbackError("Expected finished state, not " + mState);
+        }
+        if (alwaysHandlers != null) {
+            for (Subscription<Runnable> subscription : alwaysHandlers) {
+                fireAlways(subscription.executor, subscription.handler);
             }
         }
     }
 
-    protected void fireFinished(Executor executor, final PromiseHandler<?> handler) {
+    @SuppressWarnings("unchecked")
+    protected void fireValue(Executor executor, final PromiseValueHandler<?> handler) {
+        assertState(State.RESOLVED);
+
         if (executor == null) {
-            doFireFinished(handler);
+            try {
+                ((PromiseValueHandler<Object>) handler).onValue(mValue);
+            } catch (Throwable thr) {
+                onFallbackError("Calling onValue handler failed");
+            }
         } else {
             executor.execute(new Runnable() {
                 public void run() {
-                    doFireFinished(handler);
+                    try {
+                        ((PromiseValueHandler<Object>) handler).onValue(mValue);
+                    } catch (Throwable thr) {
+                        onFallbackError("Calling onValue handler failed");
+                    }
                 }
             });
         }
     }
 
-    private void doFireFinished(PromiseHandler<?> handler) {
-        State state = mState;
-        if (state == State.RESOLVED) {
-            try {
-                @SuppressWarnings("unchecked")
-                Object ownValue = ((PromiseHandler<Object>) handler).onValue(mValue);
-                resolve(ownValue);
-            } catch (Throwable thr) {
-                fireError(handler, new Exception("Calling onValue handler failed", thr));
-            }
-        } else if (state == State.REJECTED) {
-            fireError(handler, mRejectCause);
-        } else {
-            fireError(handler, new IllegalStateException("Expected finished state, not " + mState));
-        }
+    protected void fireError(Executor executor, final PromiseErrorHandler handler) {
+        assertState(State.REJECTED);
 
-        try {
-            handler.always();
-        } catch (Throwable thr) {
-            fireError(handler, new Exception("Calling always handler failed", thr));
+        if (executor == null) {
+            try {
+                handler.onError(mRejectCause);
+            } catch (Throwable thr) {
+                onFallbackError("Calling onError handler failed");
+            }
+        } else {
+            executor.execute(new Runnable() {
+                public void run() {
+                    try {
+                        handler.onError(mRejectCause);
+                    } catch (Throwable thr) {
+                        onFallbackError("Calling onError handler failed");
+                    }
+                }
+            });
         }
     }
 
-    private void fireError(PromiseHandler<?> handler, Throwable thr) {
-        try {
-            handler.onError(thr);
-        } catch (Throwable thr2) {
-            onFallbackError("Calling onError handler failed", thr2);
+    protected void fireAlways(Executor executor, final Runnable handler) {
+        assertFinished();
+
+        if (executor == null) {
+            try {
+                handler.run();
+            } catch (Throwable thr) {
+                onFallbackError("Calling always handler failed");
+            }
+        } else {
+            executor.execute(new Runnable() {
+                public void run() {
+                    try {
+                        handler.run();
+                    } catch (Throwable thr) {
+                        onFallbackError("Calling always handler failed");
+                    }
+                }
+            });
         }
+    }
+
+    protected static void onFallbackError(String msg) {
+        onFallbackError(msg, new Exception(msg));
     }
 
     protected static void onFallbackError(String msg, Throwable thr) {
         System.err.println(msg);
         thr.printStackTrace();
+    }
+
+    protected void assertState(State state) {
+        if (mState != state) {
+            throw new IllegalStateException("Expected promise state " + state + ", not " + mState);
+        }
     }
 
     protected void assertFinished() {
@@ -311,12 +412,21 @@ public abstract class Promise {
     }
 
     /**
-     * Returns the value if the promise finished successfully. In other cases null is returned.
+     * Returns the value if the promise was resolved. In other cases null is returned.
      *
      * @return the value - or null if there is no value (yet)
      */
     public Object getValue() {
         return mValue;
+    }
+
+    /**
+     * Returns the exception if the promise was rejected. In other cases null is returned.
+     *
+     * @return the exception - or null if there is no exception (yet)
+     */
+    public Throwable getRejectCause() {
+        return mRejectCause;
     }
 
     public Object waitForResult() throws Exception {
@@ -330,7 +440,7 @@ public abstract class Promise {
                 if (timeout > 0) {
                     long timeLeft = timeoutTime - System.currentTimeMillis();
                     if (timeLeft < 0) {
-                        throw new TimeoutException();
+                        throw new TimeoutException("Waiting for promise result timed out");
                     }
                     this.wait(timeLeft);
                 } else {
@@ -427,18 +537,17 @@ public abstract class Promise {
 
     }
 
-    private static class WrapperHandler extends PromiseHandler<Object> {
+    private static class ThenWrapperHandler<ValueType> implements PromiseValueHandler<ValueType>, PromiseErrorHandler {
 
-        private PromiseHandler<?> mNestedHandler;
+        private PromiseThenHandler<ValueType> mNestedHandler;
         private Promise mPromise;
 
 
-        WrapperHandler(PromiseHandler<?> nestedHandler) {
+        ThenWrapperHandler(PromiseThenHandler<ValueType> nestedHandler) {
             mNestedHandler = nestedHandler;
             mPromise = new Promise() {
                 @Override
                 protected void execute(Resolver resolver) {
-
                 }
             };
         }
@@ -448,59 +557,26 @@ public abstract class Promise {
         }
 
         @Override
-        public Object onValue(Object value) throws Throwable {
+        public void onValue(ValueType value) {
             try {
                 @SuppressWarnings("unchecked")
-                Object nestedValue = ((PromiseHandler<Object>) mNestedHandler).onValue(value);
-                if (mPromise != null) {
-                    mPromise.resolve(nestedValue);
-                }
+                Object nestedValue = mNestedHandler.onValue(value);
+                mPromise.resolve(nestedValue);
             } catch (Throwable thr) {
-                if (mPromise != null) {
-                    mPromise.reject(thr);
-                } else {
-                    throw thr;
-                }
+                mPromise.reject(thr);
             }
-            return null;
         }
 
         @Override
-        public Object onError(Throwable cause) throws Throwable {
-            try {
-                Object nestedValue = mNestedHandler.onError(cause);
-                if (mPromise != null) {
-                    mPromise.resolve(nestedValue);
-                }
-            } catch (Throwable thr) {
-                if (mPromise != null) {
-                    mPromise.reject(thr);
-                } else {
-                    throw thr;
-                }
-            }
-            return null;
+        public void onError(Throwable thr) {
+            mPromise.reject(thr);
         }
-
-        @Override
-        public void always() {
-            try {
-                mNestedHandler.always();
-            } catch (Throwable thr) {
-                if (mPromise != null) {
-                    mPromise.reject(thr);
-                } else {
-                    onFallbackError("Calling always handler failed", thr);
-                }
-            }
-        }
-
     }
 
 
     private static class AllPromise extends Promise {
 
-        private Object[] mGatheredValues;
+        private final Object[] mGatheredValues;
         private int mPendingHandlerCount;
 
         AllPromise(Object... promisesOrValues) {
@@ -516,7 +592,7 @@ public abstract class Promise {
                     } else {
                         addAncestor(promise);
                         mPendingHandlerCount++;
-                        addHandler(promise, i);
+                        addHandlers(promise, i);
                     }
                 } else {
                     mGatheredValues[i] = item;
@@ -531,28 +607,28 @@ public abstract class Promise {
         @Override
         protected void execute(Resolver resolver) {}
 
-        private void addHandler(Promise promise, final int valueIndex) {
-            promise.handle(new PromiseHandler<Object>() {
-                @Override
-                public Object onValue(Object value) throws Throwable {
-                    boolean finished;
-                    synchronized(mGatheredValues) {
-                        mPendingHandlerCount--;
-                        mGatheredValues[valueIndex] = value;
-                        finished = (mPendingHandlerCount == 0);
-                    }
-                    if (finished) {
-                        resolve(mGatheredValues);
-                    }
-
-                    return null;
-                }
-                @Override
-                public Object onError(Throwable thr) throws Throwable {
-                    reject(thr);
-                    return null;
-                }
-            });
+        private void addHandlers(Promise promise, final int valueIndex) {
+            promise
+                    .onValue(new PromiseValueHandler<Object>() {
+                        @Override
+                        public void onValue(Object value) {
+                            boolean finished;
+                            synchronized(mGatheredValues) {
+                                mPendingHandlerCount--;
+                                mGatheredValues[valueIndex] = value;
+                                finished = (mPendingHandlerCount == 0);
+                            }
+                            if (finished) {
+                                resolve(mGatheredValues);
+                            }
+                        }
+                    })
+                    .onError(new PromiseErrorHandler() {
+                        @Override
+                        public void onError(Throwable thr) {
+                            reject(thr);
+                        }
+                    });
         }
 
     }
