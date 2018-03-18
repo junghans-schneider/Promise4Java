@@ -8,10 +8,10 @@ package de.junghansschneider.promise;
 
 import java.util.concurrent.Executor;
 
-public class Deferred implements Promise.Resolver {
+public class Deferred<ValueType> implements Promise.Resolver<ValueType> {
 
-    private Promise.Resolver mResolver;
-    private Promise mPromise;
+    private Promise.Resolver<ValueType> mResolver;
+    private Promise<ValueType> mPromise;
 
 
     public Deferred() {
@@ -19,8 +19,8 @@ public class Deferred implements Promise.Resolver {
     }
 
     public Deferred(Executor executor) {
-        mPromise = new Promise(executor) {
-            protected void execute(Promise.Resolver resolver) {
+        mPromise = new Promise<ValueType>(executor) {
+            protected void execute(Promise.Resolver<ValueType> resolver) {
                 mResolver = resolver;
                 Deferred.this.execute();
             }
@@ -34,8 +34,12 @@ public class Deferred implements Promise.Resolver {
         return mPromise;
     }
 
-    public void resolve(Object value) {
+    public void resolve(ValueType value) {
         mResolver.resolve(value);
+    }
+
+    public void resolve(Promise<ValueType> valuePromise) {
+        mResolver.resolve(valuePromise);
     }
 
     public void reject(Throwable thr) {

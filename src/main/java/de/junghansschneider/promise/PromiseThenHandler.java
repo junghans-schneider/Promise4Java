@@ -6,8 +6,8 @@
 
 package de.junghansschneider.promise;
 
-public interface PromiseThenHandler<ValueType> {
+public interface PromiseThenHandler<ValueType, ChildValueType> {
 
-    Object onValue(ValueType value) throws Throwable;
+    Promise<ChildValueType> onValue(ValueType value) throws Throwable;
 
 }

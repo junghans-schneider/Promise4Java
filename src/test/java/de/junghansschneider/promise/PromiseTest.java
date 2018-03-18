@@ -39,19 +39,19 @@ public class PromiseTest extends TestCase {
     private void examples() {
         // Normal chain, different handler types
         Promise examplePromise
-                = new Promise() {
+                = new Promise<Integer>() {
                     @Override
-                    protected void execute(Promise.Resolver resolver) {
+                    protected void execute(Promise.Resolver<Integer> resolver) {
                         resolver.resolve(1234);
                     }
                 }.
-                then(new PromiseThenHandler<Integer>() {
+                then(new PromiseThenHandler<Integer, String>() {
                     @Override
-                    public Promise onValue(Integer value) {
+                    public Promise<String> onValue(Integer value) {
                         // Nest other promise
-                        return new Promise() {
+                        return new Promise<String>() {
                             @Override
-                            protected void execute(Promise.Resolver resolver) {
+                            protected void execute(Promise.Resolver<String> resolver) {
                                 resolver.resolve("Hallo");
                             }
                         };
@@ -71,9 +71,9 @@ public class PromiseTest extends TestCase {
                 });
 
         // .all
-        Promise promise1 = null;
-        Promise promise2 = null;
-        Promise promise3 = null;
+        Promise<Integer> promise1 = null;
+        Promise<String> promise2 = null;
+        Promise<Double> promise3 = null;
         Promise.all("value", promise1, promise2, promise3)
                 .onValue(new PromiseValueHandler<Object[]>() {
                     @Override
@@ -83,7 +83,7 @@ public class PromiseTest extends TestCase {
                 });
 
         // Turn value or promise into promise
-        Promise.when("value")
+        Promise.resolvedPromise("value")
                 .onValue(new PromiseValueHandler<String>() {
                     @Override
                     public void onValue(String value) {
@@ -95,10 +95,10 @@ public class PromiseTest extends TestCase {
         Executor backgroundExecutor = null;
         Executor uiExecutor = null;
 
-        Promise multithreadPromise
-                = new Promise(backgroundExecutor) {
+        Promise<String> multithreadPromise
+                = new Promise<String>(backgroundExecutor) {
                     @Override
-                    protected void execute(Promise.Resolver resolver) {
+                    protected void execute(Promise.Resolver<String> resolver) {
                         // Load file in background thread
                         String content = null;
                         resolver.resolve(content);
@@ -126,10 +126,10 @@ public class PromiseTest extends TestCase {
 
     public void testSimpleValue() throws Throwable {
         final boolean[] handlerCalled = new boolean[] { false, false, false };
-        Promise promise
-                = new Promise() {
+        Promise<String> promise
+                = new Promise<Integer>() {
                     @Override
-                    protected void execute(Promise.Resolver resolver) {
+                    protected void execute(Promise.Resolver<Integer> resolver) {
                         assertFalse(handlerCalled[0]);
                         assertFalse(handlerCalled[1]);
                         assertFalse(handlerCalled[2]);
@@ -137,15 +137,15 @@ public class PromiseTest extends TestCase {
                         resolver.resolve(1234);
                     }
                 }
-                .then(new PromiseThenHandler<Integer>() {
+                .then(new PromiseThenHandler<Integer, String>() {
                     @Override
-                    public Object onValue(Integer value) {
+                    public Promise<String> onValue(Integer value) {
                         assertTrue(handlerCalled[0]);
                         assertFalse(handlerCalled[1]);
                         assertFalse(handlerCalled[2]);
                         handlerCalled[1] = true;
                         assertEquals(1234, value.intValue());
-                        return "my-result";
+                        return Promise.resolvedPromise("my-result");
                     }
                 })
                 .always(new Runnable() {
@@ -167,16 +167,16 @@ public class PromiseTest extends TestCase {
     }
 
     public void testComplexValue() throws Throwable {
-        Promise promise
-                = new Promise() {
+        Promise<String> promise
+                = new Promise<Integer>() {
                     @Override
-                    protected void execute(Promise.Resolver resolver) {
-                        resolver.resolve(new Promise() {
+                    protected void execute(Promise.Resolver<Integer> resolver) {
+                        resolver.resolve(new Promise<Integer>() {
                             @Override
-                            protected void execute(Promise.Resolver resolver) {
-                                resolver.resolve(new Promise() {
+                            protected void execute(Promise.Resolver<Integer> resolver) {
+                                resolver.resolve(new Promise<Integer>() {
                                     @Override
-                                    protected void execute(Promise.Resolver resolver) {
+                                    protected void execute(Promise.Resolver<Integer> resolver) {
                                         resolver.resolve(1234);
                                     }
                                 });
@@ -184,17 +184,17 @@ public class PromiseTest extends TestCase {
                         });
                     }
                 }
-                .then(createPipeThenHandler())
-                .then(createPipeThenHandler())
-                .then(new PromiseThenHandler<Integer>() {
+                .then(createPipeThenHandler(Integer.class))
+                .then(createPipeThenHandler(Integer.class))
+                .then(new PromiseThenHandler<Integer, String>() {
                     @Override
-                    public Object onValue(Integer value) throws Exception {
+                    public Promise<String> onValue(Integer value) throws Exception {
                         assertEquals(1234, value.intValue());
-                        return "handler-called";
+                        return Promise.resolvedPromise("handler-called");
                     }
                 })
-                .then(createPipeThenHandler())
-                .then(createPipeThenHandler());
+                .then(createPipeThenHandler(String.class))
+                .then(createPipeThenHandler(String.class));
 
         assertEquals("handler-called", promise.waitForResult(5000));
     }
@@ -236,16 +236,16 @@ public class PromiseTest extends TestCase {
 
     public void testComplexError() throws Throwable {
         final boolean[] handlerCalled = new boolean[] { false, false };
-        Promise promise
-                = new Promise() {
+        Promise<String> promise
+                = new Promise<String>() {
                     @Override
-                    protected void execute(Promise.Resolver resolver) {
-                        resolver.resolve(new Promise() {
+                    protected void execute(Promise.Resolver<String> resolver) {
+                        resolver.resolve(new Promise<String>() {
                             @Override
-                            protected void execute(Promise.Resolver resolver) {
-                                resolver.resolve(new Promise() {
+                            protected void execute(Promise.Resolver<String> resolver) {
+                                resolver.resolve(new Promise<String>() {
                                     @Override
-                                    protected void execute(Promise.Resolver resolver) {
+                                    protected void execute(Promise.Resolver<String> resolver) {
                                         throw new IllegalStateException("Test");
                                     }
                                 });
@@ -253,8 +253,8 @@ public class PromiseTest extends TestCase {
                         });
                     }
                 }
-                .then(createPipeThenHandler())
-                .then(createPipeThenHandler())
+                .then(createPipeThenHandler(String.class))
+                .then(createPipeThenHandler(String.class))
                 .onError(new PromiseErrorHandler() {
                     @Override
                     public void onError(Throwable thr) {
@@ -266,8 +266,8 @@ public class PromiseTest extends TestCase {
                         //thr.printStackTrace();
                     }
                 })
-                .then(createPipeThenHandler())
-                .then(createPipeThenHandler())
+                .then(createPipeThenHandler(String.class))
+                .then(createPipeThenHandler(String.class))
                 .always(new Runnable() {
                     @Override
                     public void run() {
@@ -288,8 +288,8 @@ public class PromiseTest extends TestCase {
 
     public void testSimpleCancel() throws Throwable {
         final boolean[] handlerCalled = new boolean[] { false, false };
-        Promise promise
-                = waitForever()
+        Promise<String> promise
+                = waitForever(String.class)
                 .onError(new PromiseErrorHandler() {
                     @Override
                     public void onError(Throwable thr) {
@@ -316,16 +316,16 @@ public class PromiseTest extends TestCase {
 
     public void testComplexCancelForward() throws Throwable {
         final boolean[] handledCancel = new boolean[] { false };
-        final LinkedList<Promise> promises = new LinkedList<Promise>();
-        final Promise[] waitPromise = new Promise[1];
+        final LinkedList<Promise<String>> promises = new LinkedList<Promise<String>>();
+        final Promise<?>[] waitPromise = new Promise[1];
 
-        Promise outerPromise = new Promise() {
+        Promise<String> outerPromise = new Promise<String>() {
             @Override
-            protected void execute(Promise.Resolver resolver) {
-                Promise promise = new Promise() {
+            protected void execute(Promise.Resolver<String> resolver) {
+                Promise<String> promise = new Promise<String>() {
                     @Override
-                    protected void execute(Promise.Resolver resolver) {
-                        Promise promise = waitForever();
+                    protected void execute(Promise.Resolver<String> resolver) {
+                        Promise<String> promise = waitForever(String.class);
                         waitPromise[0] = promise;
                         promises.add(promise);
                         resolver.resolve(promise);
@@ -337,9 +337,9 @@ public class PromiseTest extends TestCase {
         };
         promises.add(outerPromise);
 
-        promises.add(outerPromise.then(createPipeThenHandler()));
+        promises.add(outerPromise.then(createPipeThenHandler(String.class)));
         promises.add(promises.getLast()
-                .then(createPipeThenHandler())
+                .then(createPipeThenHandler(String.class))
                 .onError(new PromiseErrorHandler() {
                     @Override
                     public void onError(Throwable thr) {
@@ -348,8 +348,8 @@ public class PromiseTest extends TestCase {
                         }
                     }
                 }));
-        promises.add(promises.getLast().then(createPipeThenHandler()));
-        promises.add(promises.getLast().then(createPipeThenHandler()));
+        promises.add(promises.getLast().then(createPipeThenHandler(String.class)));
+        promises.add(promises.getLast().then(createPipeThenHandler(String.class)));
 
         assertFalse(handledCancel[0]);
         for (Promise promise : promises) {
@@ -373,15 +373,15 @@ public class PromiseTest extends TestCase {
 
     public void doTestComplexCancelBackward(boolean wholeChain) throws Throwable {
         final boolean[] handledCancel = new boolean[] { false };
-        final LinkedList<Promise> promises = new LinkedList<Promise>();
+        final LinkedList<Promise<String>> promises = new LinkedList<Promise<String>>();
 
-        Promise outerPromise = new Promise() {
+        Promise<String> outerPromise = new Promise<String>() {
             @Override
-            protected void execute(Promise.Resolver resolver) {
-                Promise promise = new Promise() {
+            protected void execute(Promise.Resolver<String> resolver) {
+                Promise<String> promise = new Promise<String>() {
                     @Override
-                    protected void execute(Promise.Resolver resolver) {
-                        Promise promise = waitForever();
+                    protected void execute(Promise.Resolver<String> resolver) {
+                        Promise<String> promise = waitForever(String.class);
                         promises.add(promise);
                         resolver.resolve(promise);
                     }
@@ -392,10 +392,10 @@ public class PromiseTest extends TestCase {
         };
         promises.add(outerPromise);
 
-        promises.add(outerPromise.then(createPipeThenHandler()));
-        promises.add(promises.getLast().then(createPipeThenHandler()));
+        promises.add(outerPromise.then(createPipeThenHandler(String.class)));
+        promises.add(promises.getLast().then(createPipeThenHandler(String.class)));
         promises.add(promises.getLast()
-                .then(createPipeThenHandler())
+                .then(createPipeThenHandler(String.class))
                 .onError(new PromiseErrorHandler() {
                     @Override
                     public void onError(Throwable thr) {
@@ -404,8 +404,8 @@ public class PromiseTest extends TestCase {
                         }
                     }
                 }));
-        promises.add(promises.getLast().then(createPipeThenHandler()));
-        promises.add(promises.getLast().then(createPipeThenHandler()));
+        promises.add(promises.getLast().then(createPipeThenHandler(String.class)));
+        promises.add(promises.getLast().then(createPipeThenHandler(String.class)));
 
         assertFalse(handledCancel[0]);
         for (Promise promise : promises) {
@@ -441,22 +441,22 @@ public class PromiseTest extends TestCase {
 
         final boolean[] wasRightExecutor = new boolean[] { false, false, false, false, false };
 
-        Promise promise
-                = new Promise(uiExecutor) {
+        Promise<Long> promise
+                = new Promise<Integer>(uiExecutor) {
                     @Override
-                    protected void execute(Resolver resolver) {
+                    protected void execute(Resolver<Integer> resolver) {
                         wasRightExecutor[0] = Thread.currentThread().getName().equals("test-ui");
                         resolver.resolve(1);
                     }
                 }
-                .then(backgroundExecutor, new PromiseThenHandler<Object>() {
-                    public Object onValue(Object value) throws Throwable {
+                .then(backgroundExecutor, new PromiseThenHandler<Integer, String>() {
+                    public Promise<String> onValue(Integer value) throws Throwable {
                         wasRightExecutor[1] = Thread.currentThread().getName().equals("test-background");
-                        return null;
+                        return Promise.resolvedPromise("stuff");
                     }
                 })
-                .then(backgroundExecutor, new PromiseThenHandler<Object>() {
-                    public Object onValue(Object value) throws Throwable {
+                .then(backgroundExecutor, new PromiseThenHandler<String, Long>() {
+                    public Promise<Long> onValue(String value) throws Throwable {
                         wasRightExecutor[2] = Thread.currentThread().getName().equals("test-background");
                         throw new Exception("Test exception");
                     }
@@ -473,7 +473,7 @@ public class PromiseTest extends TestCase {
                         wasRightExecutor[4] = Thread.currentThread().getName().equals("test-ui");
                     }
                 })
-                .then(uiExecutor, createPipeThenHandler());
+                .then(uiExecutor, createPipeThenHandler(Long.class));
 
         try {
             promise.waitForResult(2000);
@@ -528,10 +528,10 @@ public class PromiseTest extends TestCase {
         final Thread mainThread = Thread.currentThread();
         ExecutorService bgExecutor = Executors.newSingleThreadExecutor();
 
-        Promise promise1 = Promise.when(1234);
-        Promise promise2 = new Promise(bgExecutor) {
+        Promise<Integer> promise1 = Promise.resolvedPromise(1234);
+        Promise<String> promise2 = new Promise<String>(bgExecutor) {
             @Override
-            protected void execute(Resolver resolver) {
+            protected void execute(Resolver<String> resolver) {
                 assertFalse(Thread.currentThread() == mainThread);
                 try {
                     Thread.sleep(50);
@@ -540,9 +540,9 @@ public class PromiseTest extends TestCase {
                 resolver.resolve("Bla");
             }
         };
-        Promise promise3 = new Promise(bgExecutor) {
+        Promise<Boolean> promise3 = new Promise<Boolean>(bgExecutor) {
             @Override
-            protected void execute(Resolver resolver) {
+            protected void execute(Resolver<Boolean> resolver) {
                 assertFalse(Thread.currentThread() == mainThread);
                 try {
                     Thread.sleep(10);
@@ -564,7 +564,7 @@ public class PromiseTest extends TestCase {
                         assertEquals(false, ((Boolean) values[3]).booleanValue());
                     }
                 })
-                .then(createPipeThenHandler());
+                .then(createPipeThenHandler(Object[].class));
 
         outerPromise.waitForResult();
         assertTrue(handlerCalled[0]);
@@ -576,10 +576,10 @@ public class PromiseTest extends TestCase {
         final Thread mainThread = Thread.currentThread();
         ExecutorService bgExecutor = getBgExecutor();
 
-        Promise promise1 = Promise.when(1234);
-        Promise promise2 = new Promise(bgExecutor) {
+        Promise<Integer> promise1 = Promise.resolvedPromise(1234);
+        Promise<String> promise2 = new Promise<String>(bgExecutor) {
             @Override
-            protected void execute(Resolver resolver) {
+            protected void execute(Resolver<String> resolver) {
                 assertFalse(Thread.currentThread() == mainThread);
                 try {
                     Thread.sleep(50);
@@ -588,9 +588,9 @@ public class PromiseTest extends TestCase {
                 throw new RuntimeException("Test");
             }
         };
-        Promise promise3 = new Promise(bgExecutor) {
+        Promise<Boolean> promise3 = new Promise<Boolean>(bgExecutor) {
             @Override
-            protected void execute(Resolver resolver) {
+            protected void execute(Resolver<Boolean> resolver) {
                 assertFalse(Thread.currentThread() == mainThread);
                 try {
                     Thread.sleep(10);
@@ -622,49 +622,10 @@ public class PromiseTest extends TestCase {
     public void testAllCancelForward() {
         final boolean[] handledCancel = new boolean[] { false };
 
-        Promise promise1 = waitForever();
-        Promise promise2 = waitForever();
-        Promise promise3 = waitForever();
-        Promise allPromise = Promise.all(promise1, promise2, promise3);
-        Promise handlerPromise = allPromise
-                .onError(new PromiseErrorHandler() {
-                    @Override
-                    public void onError(Throwable thr) {
-                        if (Promise.isCancelled(thr)) {
-                            handledCancel[0] = true;
-                        }
-                    }
-                });
-
-        assertFalse(handledCancel[0]);
-        assertFalse(promise1.isFinished());
-        assertFalse(promise2.isFinished());
-        assertFalse(promise3.isFinished());
-        assertFalse(allPromise.isFinished());
-        assertFalse(handlerPromise.isFinished());
-
-        promise2.cancel();
-
-        assertTrue(handledCancel[0]);
-        assertFalse(promise1.isFinished());
-        assertTrue(promise2.isCancelled());
-        assertFalse(promise3.isFinished());
-        assertTrue(allPromise.isCancelled());
-        assertTrue(handlerPromise.isCancelled());
-    }
-
-    public void testAllCancelBackward() {
-        doTestAllCancelBackward(false);
-        doTestAllCancelBackward(true);
-    }
-
-    private void doTestAllCancelBackward(boolean wholeChain) {
-        final boolean[] handledCancel = new boolean[] { false };
-
-        Promise promise1 = waitForever();
-        Promise promise2 = waitForever();
-        Promise promise3 = waitForever();
-        Promise allPromise
+        Promise<String> promise1 = waitForever(String.class);
+        Promise<Integer> promise2 = waitForever(Integer.class);
+        Promise<Boolean> promise3 = waitForever(Boolean.class);
+        Promise<Object[]> allPromise
                 = Promise.all(promise1, promise2, promise3)
                 .onError(new PromiseErrorHandler() {
                     @Override
@@ -675,7 +636,48 @@ public class PromiseTest extends TestCase {
                     }
                 });
         Promise lastPromise = allPromise
-                .then(createPipeThenHandler());
+                .then(createPipeThenHandler(Object[].class));
+
+        assertFalse(handledCancel[0]);
+        assertFalse(promise1.isFinished());
+        assertFalse(promise2.isFinished());
+        assertFalse(promise3.isFinished());
+        assertFalse(allPromise.isFinished());
+        assertFalse(lastPromise.isFinished());
+
+        promise2.cancel();
+
+        assertTrue(handledCancel[0]);
+        assertFalse(promise1.isFinished());
+        assertTrue(promise2.isCancelled());
+        assertFalse(promise3.isFinished());
+        assertTrue(allPromise.isCancelled());
+        assertTrue(lastPromise.isCancelled());
+    }
+
+    public void testAllCancelBackward() {
+        doTestAllCancelBackward(false);
+        doTestAllCancelBackward(true);
+    }
+
+    private void doTestAllCancelBackward(boolean wholeChain) {
+        final boolean[] handledCancel = new boolean[] { false };
+
+        Promise<String> promise1 = waitForever(String.class);
+        Promise<Integer> promise2 = waitForever(Integer.class);
+        Promise<Boolean> promise3 = waitForever(Boolean.class);
+        Promise<Object[]> allPromise
+                = Promise.all(promise1, promise2, promise3)
+                .onError(new PromiseErrorHandler() {
+                    @Override
+                    public void onError(Throwable thr) {
+                        if (Promise.isCancelled(thr)) {
+                            handledCancel[0] = true;
+                        }
+                    }
+                });
+        Promise lastPromise = allPromise
+                .then(createPipeThenHandler(Object[].class));
 
         assertFalse(handledCancel[0]);
         assertFalse(promise1.isFinished());
@@ -701,40 +703,40 @@ public class PromiseTest extends TestCase {
         assertTrue(parkingList.size() >= 30);
     }
 
-    private Promise loadParkings(final int radius, final int minResultSize) {
+    private Promise<List<Object>> loadParkings(final int radius, final int minResultSize) {
         return
-                new Promise() {
+                new Promise<List<Object>>() {
                     @Override
-                    protected void execute(Resolver resolver) {
+                    protected void execute(Resolver<List<Object>> resolver) {
                         List<Object> parkingList = Arrays.asList(new Object[radius]);
                         resolver.resolve(parkingList);
                     }
                 }
-                .then(new PromiseThenHandler<List<Object>>() {
+                .then(new PromiseThenHandler<List<Object>, List<Object>>() {
                     @Override
-                    public Object onValue(List<Object> parkingList) {
+                    public Promise<List<Object>> onValue(List<Object> parkingList) {
                         if (parkingList.size() < minResultSize) {
                             return loadParkings(radius + 10, minResultSize);
                         } else {
-                            return parkingList;
+                            return Promise.resolvedPromise(parkingList);
                         }
                     }
                 });
     }
 
-    private Promise waitForever() {
-        return new Promise() {
+    private static <ValueType> Promise<ValueType> waitForever(Class<ValueType> type) {
+        return new Promise<ValueType>() {
             @Override
-            protected void execute(Resolver resolver) {
+            protected void execute(Resolver<ValueType> resolver) {
             }
         };
     }
 
-    private static PromiseThenHandler<Object> createPipeThenHandler() {
-        return new PromiseThenHandler<Object>() {
+    private static <ValueType> PromiseThenHandler<ValueType, ValueType> createPipeThenHandler(Class<ValueType> type) {
+        return new PromiseThenHandler<ValueType, ValueType>() {
             @Override
-            public Object onValue(Object value) throws Exception {
-                return value;
+            public Promise<ValueType> onValue(ValueType value) throws Exception {
+                return Promise.resolvedPromise(value);
             }
         };
     }
