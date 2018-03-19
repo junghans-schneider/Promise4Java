@@ -17,22 +17,61 @@ import java.util.concurrent.Executors;
 
 public class PromiseTest extends TestCase {
 
+    private Executor mDefaultExecutor;
+    private ExecutorService mUiExecutor;
     private ExecutorService mBgExecutor;
+
+
+    @Override
+    protected void setUp() throws Exception {
+        super.setUp();
+        mDefaultExecutor = Promise.getDefaultExecutor();
+    }
 
     @Override
     protected void tearDown() throws Exception {
         super.tearDown();
+        Promise.setDefaultExecutor(mDefaultExecutor);
+        if (mUiExecutor != null) {
+            mUiExecutor.shutdown();
+            mUiExecutor = null;
+        }
         if (mBgExecutor != null) {
             mBgExecutor.shutdown();
             mBgExecutor = null;
         }
     }
 
+    private ExecutorService getUiExecutor() {
+        if (mUiExecutor == null) {
+            mUiExecutor = Executors.newSingleThreadExecutor();
+            mUiExecutor.execute(new Runnable() {
+                public void run() {
+                    Thread.currentThread().setName("test-ui");
+                }
+            });
+        }
+        return mUiExecutor;
+    }
+
+    private boolean isUiExecutor() {
+        return Thread.currentThread().getName().equals("test-ui");
+    }
+
     private ExecutorService getBgExecutor() {
         if (mBgExecutor == null) {
             mBgExecutor = Executors.newSingleThreadExecutor();
+            mBgExecutor.execute(new Runnable() {
+                public void run() {
+                    Thread.currentThread().setName("test-background");
+                }
+            });
         }
         return mBgExecutor;
+    }
+
+    private boolean isBgExecutor() {
+        return Thread.currentThread().getName().equals("test-background");
     }
 
 
@@ -201,8 +240,8 @@ public class PromiseTest extends TestCase {
 
     public void testSimpleError() throws Throwable {
         final boolean[] handlerCalled = new boolean[] { false, false };
-        Promise promise
-                = new Promise() {
+        Promise<String> promise
+                = new Promise<String>() {
                     @Override
                     protected void execute(Promise.Resolver resolver) {
                         throw new IllegalStateException("Test");
@@ -425,55 +464,41 @@ public class PromiseTest extends TestCase {
     }
 
     public void testExecutors() {
-        ExecutorService uiExecutor = Executors.newSingleThreadExecutor();
-        uiExecutor.execute(new Runnable() {
-            public void run() {
-                Thread.currentThread().setName("test-ui");
-            }
-        });
-
-        ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor();
-        backgroundExecutor.execute(new Runnable() {
-            public void run() {
-                Thread.currentThread().setName("test-background");
-            }
-        });
-
         final boolean[] wasRightExecutor = new boolean[] { false, false, false, false, false };
 
         Promise<Long> promise
-                = new Promise<Integer>(uiExecutor) {
+                = new Promise<Integer>(getUiExecutor()) {
                     @Override
                     protected void execute(Resolver<Integer> resolver) {
-                        wasRightExecutor[0] = Thread.currentThread().getName().equals("test-ui");
+                        wasRightExecutor[0] = isUiExecutor();
                         resolver.resolve(1);
                     }
                 }
-                .then(backgroundExecutor, new PromiseThenHandler<Integer, String>() {
+                .then(getBgExecutor(), new PromiseThenHandler<Integer, String>() {
                     public Promise<String> onValue(Integer value) throws Throwable {
-                        wasRightExecutor[1] = Thread.currentThread().getName().equals("test-background");
+                        wasRightExecutor[1] = isBgExecutor();
                         return Promise.resolvedPromise("stuff");
                     }
                 })
-                .then(backgroundExecutor, new PromiseThenHandler<String, Long>() {
+                .then(getBgExecutor(), new PromiseThenHandler<String, Long>() {
                     public Promise<Long> onValue(String value) throws Throwable {
-                        wasRightExecutor[2] = Thread.currentThread().getName().equals("test-background");
+                        wasRightExecutor[2] = isBgExecutor();
                         throw new Exception("Test exception");
                     }
                 })
-                .onError(uiExecutor, new PromiseErrorHandler() {
+                .onError(getUiExecutor(), new PromiseErrorHandler() {
                     @Override
                     public void onError(Throwable thr) {
-                        wasRightExecutor[3] = Thread.currentThread().getName().equals("test-ui");
+                        wasRightExecutor[3] = isUiExecutor();
                     }
                 })
-                .always(uiExecutor, new Runnable() {
+                .always(getUiExecutor(), new Runnable() {
                     @Override
                     public void run() {
-                        wasRightExecutor[4] = Thread.currentThread().getName().equals("test-ui");
+                        wasRightExecutor[4] = isUiExecutor();
                     }
                 })
-                .then(uiExecutor, createPipeThenHandler(Long.class));
+                .then(getUiExecutor(), createPipeThenHandler(Long.class));
 
         try {
             promise.waitForResult(2000);
@@ -487,9 +512,73 @@ public class PromiseTest extends TestCase {
         assertTrue(wasRightExecutor[2]);
         assertTrue(wasRightExecutor[3]);
         assertTrue(wasRightExecutor[4]);
+    }
 
-        uiExecutor.shutdown();
-        backgroundExecutor.shutdown();
+    public void testDefaultExecutor() {
+        final boolean[] wasRightExecutor = new boolean[] { false, false, false, false, false, false, false };
+
+        Promise.setDefaultExecutor(getUiExecutor());
+
+        Promise<Long> promise
+                = new Promise<Integer>() {
+                    @Override
+                    protected void execute(Resolver<Integer> resolver) {
+                        wasRightExecutor[0] = isUiExecutor();
+                        resolver.resolve(1);
+                    }
+                }
+                .then(getBgExecutor(), new PromiseThenHandler<Integer, String>() {
+                    public Promise<String> onValue(Integer value) throws Throwable {
+                        wasRightExecutor[1] = isBgExecutor();
+                        return Promise.resolvedPromise("stuff");
+                    }
+                })
+                .then(new PromiseThenHandler<String, Long>() {
+                    public Promise<Long> onValue(String value) throws Throwable {
+                        wasRightExecutor[2] = isUiExecutor();
+                        throw new Exception("Test exception");
+                    }
+                })
+                .onError(getBgExecutor(), new PromiseErrorHandler() {
+                    @Override
+                    public void onError(Throwable thr) {
+                        wasRightExecutor[3] = isBgExecutor();
+                    }
+                })
+                .onError(new PromiseErrorHandler() {
+                    @Override
+                    public void onError(Throwable thr) {
+                        wasRightExecutor[4] = isUiExecutor();
+                    }
+                })
+                .always(getBgExecutor(), new Runnable() {
+                    @Override
+                    public void run() {
+                        wasRightExecutor[5] = isBgExecutor();
+                    }
+                })
+                .always(new Runnable() {
+                    @Override
+                    public void run() {
+                        wasRightExecutor[6] = isUiExecutor();
+                    }
+                })
+                .then(createPipeThenHandler(Long.class));
+
+        try {
+            promise.waitForResult(2000);
+            fail("Exception expected");
+        } catch (Exception exc) {
+            assertEquals("Test exception", exc.getMessage());
+        }
+
+        assertTrue(wasRightExecutor[0]);
+        assertTrue(wasRightExecutor[1]);
+        assertTrue(wasRightExecutor[2]);
+        assertTrue(wasRightExecutor[3]);
+        assertTrue(wasRightExecutor[4]);
+        assertTrue(wasRightExecutor[5]);
+        assertTrue(wasRightExecutor[6]);
     }
 
     public void testAllEmpty() {

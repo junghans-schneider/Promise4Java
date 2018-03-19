@@ -46,6 +46,7 @@ public abstract class Promise<ValueType> {
 
     protected static enum State { QUEUED, EXECUTING, PENDING, RESOLVED, REJECTED};
 
+    protected static Executor mDefaultExecutor = new DefaultExecutor();
     protected static Subscription<PromiseErrorHandler> mFallbackErrorHandler;
 
 
@@ -69,6 +70,19 @@ public abstract class Promise<ValueType> {
         if (executeNow) {
             execute(executor);
         }
+    }
+
+    /**
+     * Sets the executor to use if no executor was specified for the promise's execute method or a promise handler.
+     *
+     * @param defaultExecutor the default executor
+     */
+    public static void setDefaultExecutor(Executor defaultExecutor) {
+        mDefaultExecutor = defaultExecutor;
+    }
+
+    public static Executor getDefaultExecutor() {
+        return mDefaultExecutor;
     }
 
     public static void setFallbackErrorHandler(PromiseErrorHandler fallbackErrorHandler) {
@@ -314,44 +328,38 @@ public abstract class Promise<ValueType> {
         assertState(State.RESOLVED);
 
         if (executor == null) {
-            try {
-                handler.onValue(mValue);
-            } catch (Throwable thr) {
-                onFallbackError("Calling onValue handler failed");
-            }
-        } else {
-            executor.execute(new Runnable() {
-                public void run() {
-                    try {
-                        handler.onValue(mValue);
-                    } catch (Throwable thr) {
-                        onFallbackError("Calling onValue handler failed");
-                    }
-                }
-            });
+            executor = getDefaultExecutor();
         }
+
+        executor.execute(new Runnable() {
+            public void run() {
+                try {
+                    handler.onValue(mValue);
+                } catch (Throwable thr) {
+                    String handlerType = (handler instanceof AlwaysWrapper) ? "always" : "onValue";
+                    onFallbackError("Calling " + handlerType + " handler failed");
+                }
+            }
+        });
     }
 
     protected void fireError(Executor executor, final PromiseErrorHandler handler) {
         assertState(State.REJECTED);
 
         if (executor == null) {
-            try {
-                handler.onError(mRejectCause);
-            } catch (Throwable thr) {
-                onFallbackError("Calling onError handler failed");
-            }
-        } else {
-            executor.execute(new Runnable() {
-                public void run() {
-                    try {
-                        handler.onError(mRejectCause);
-                    } catch (Throwable thr) {
-                        onFallbackError("Calling onError handler failed");
-                    }
-                }
-            });
+            executor = getDefaultExecutor();
         }
+
+        executor.execute(new Runnable() {
+            public void run() {
+                try {
+                    handler.onError(mRejectCause);
+                } catch (Throwable thr) {
+                    String handlerType = (handler instanceof AlwaysWrapper) ? "always" : "onError";
+                    onFallbackError("Calling " + handlerType + " handler failed");
+                }
+            }
+        });
     }
 
     protected static void onFallbackError(String msg) {
@@ -444,52 +452,62 @@ public abstract class Promise<ValueType> {
 
     protected void execute(Executor executor) {
         if (executor == null) {
-            doExecute();
-        } else {
-            executor.execute(new Runnable() {
-                public void run() {
-                    doExecute();
-                }
-            });
+            executor = getDefaultExecutor();
         }
-    }
 
-    private void doExecute() {
-        try {
-            synchronized(this) {
-                if (mState != State.QUEUED) {
-                    return; // This promise has already started
-                }
-                mState = State.EXECUTING;
-            }
+        executor.execute(new Runnable() {
+            public void run() {
+                try {
+                    synchronized(this) {
+                        if (mState != State.QUEUED) {
+                            return; // This promise has already started
+                        }
+                        mState = State.EXECUTING;
+                    }
 
-            Resolver<ValueType> resolver = new Resolver<ValueType>() {
-                public void resolve(ValueType value) {
-                    Promise.this.resolve(value);
-                }
-                public void resolve(Promise<ValueType> valuePromise) {
-                    Promise.this.resolve(valuePromise);
-                }
-                public void reject(Throwable thr) {
-                    Promise.this.reject(thr);
-                }
-                public boolean isCancelled() {
-                    return Promise.this.isCancelled();
-                }
-            };
+                    Resolver<ValueType> resolver = new Resolver<ValueType>() {
+                        public void resolve(ValueType value) {
+                            Promise.this.resolve(value);
+                        }
+                        public void resolve(Promise<ValueType> valuePromise) {
+                            Promise.this.resolve(valuePromise);
+                        }
+                        public void reject(Throwable thr) {
+                            Promise.this.reject(thr);
+                        }
+                        public boolean isCancelled() {
+                            return Promise.this.isCancelled();
+                        }
+                    };
 
-            execute(resolver);
+                    execute(resolver);
 
-            synchronized(this) {
-                if (! isFinished()) {
-                    mState = State.PENDING;
+                    synchronized(this) {
+                        if (! isFinished()) {
+                            mState = State.PENDING;
+                        }
+                    }
+                } catch (Throwable thr) {
+                    reject(thr);
                 }
             }
-        } catch (Throwable thr) {
-            reject(thr);
-        }
+        });
     }
 
+
+    private static class DefaultExecutor implements Executor {
+        private boolean mLoggedWarning = false;
+
+        @Override
+        public void execute(Runnable command) {
+            if (!mLoggedWarning) {
+                System.out.println("You should specify a default executor (using Promise.setDefaultExecutor), "
+                        + "so promises can always be resolved asynchronously and fallback error handling can work properly");
+                mLoggedWarning = true;
+            }
+            command.run();
+        }
+    }
 
     private static class ResolvedPromise<ValueType> extends Promise<ValueType> {
 
