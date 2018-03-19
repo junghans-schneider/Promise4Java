@@ -80,7 +80,7 @@ public abstract class Promise<ValueType> {
         mFallbackErrorHandler = new Subscription<PromiseErrorHandler>(executor, fallbackErrorHandler);
     }
 
-    protected abstract void execute(Resolver<ValueType> resolver);
+    protected abstract void execute(Resolver<ValueType> resolver) throws Exception;
 
     public boolean isFinished() {
         return mState == State.RESOLVED || mState == State.REJECTED;
