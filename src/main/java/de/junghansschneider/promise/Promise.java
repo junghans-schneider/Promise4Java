@@ -90,7 +90,11 @@ public abstract class Promise<ValueType> {
     }
 
     public static void setFallbackErrorHandler(Executor executor, PromiseErrorHandler fallbackErrorHandler) {
-        mFallbackErrorHandler = new Subscription<PromiseErrorHandler>(executor, fallbackErrorHandler);
+        if (fallbackErrorHandler == null) {
+            mFallbackErrorHandler = null;
+        } else {
+            mFallbackErrorHandler = new Subscription<PromiseErrorHandler>(executor, fallbackErrorHandler);
+        }
     }
 
     protected abstract void execute(Resolver<ValueType> resolver) throws Exception;
@@ -170,21 +174,6 @@ public abstract class Promise<ValueType> {
         AlwaysWrapper wrapperHandler = new AlwaysWrapper(handler);
         onValue(executor, wrapperHandler);
         onError(executor, wrapperHandler);
-        return this;
-    }
-
-    public Promise<ValueType> end() {
-        if (mFallbackErrorHandler == null) {
-            mFallbackErrorHandler = new Subscription<PromiseErrorHandler>(
-                    null,
-                    new PromiseErrorHandler() {
-                        public void onError(Throwable thr) {
-                            onFallbackError("Error at the end of a promise chain", thr);
-                        }
-                    });
-        }
-
-        onError(mFallbackErrorHandler.executor, mFallbackErrorHandler.handler);
         return this;
     }
 
@@ -313,10 +302,27 @@ public abstract class Promise<ValueType> {
                 }
             }
         } else if (state == State.REJECTED) {
+            boolean errorWasHandled = false;
             if (errorHandlers != null) {
                 for (Subscription<PromiseErrorHandler> subscription : errorHandlers) {
                     fireError(subscription.executor, subscription.handler);
+                    if (!(subscription.handler instanceof AlwaysWrapper)) {
+                        errorWasHandled = true;
+                    }
                 }
+            }
+
+            if (!errorWasHandled) {
+                if (mFallbackErrorHandler == null) {
+                    mFallbackErrorHandler = new Subscription<PromiseErrorHandler>(
+                            null,
+                            new PromiseErrorHandler() {
+                                public void onError(Throwable thr) {
+                                    onFallbackError("Error at the end of a promise chain", thr);
+                                }
+                            });
+                }
+                fireError(mFallbackErrorHandler.executor, mFallbackErrorHandler.handler);
             }
         } else {
             onFallbackError("Expected finished state, not " + mState);

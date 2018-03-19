@@ -26,12 +26,19 @@ public class PromiseTest extends TestCase {
     protected void setUp() throws Exception {
         super.setUp();
         mDefaultExecutor = Promise.getDefaultExecutor();
+        Promise.setFallbackErrorHandler(new PromiseErrorHandler() {
+            @Override
+            public void onError(Throwable thr) {
+                // Ignore unhandled errors
+            }
+        });
     }
 
     @Override
     protected void tearDown() throws Exception {
         super.tearDown();
         Promise.setDefaultExecutor(mDefaultExecutor);
+        Promise.setFallbackErrorHandler(null);
         if (mUiExecutor != null) {
             mUiExecutor.shutdown();
             mUiExecutor = null;
@@ -461,6 +468,27 @@ public class PromiseTest extends TestCase {
             assertEquals(expectCancelled, promise.isFinished());
             assertEquals(expectCancelled, promise.isCancelled());
         }
+    }
+
+    public void testFallbackErrorHandler() {
+        final boolean[] wasHandled = new boolean[] { false };
+
+        Promise.setFallbackErrorHandler(new PromiseErrorHandler() {
+            @Override
+            public void onError(Throwable thr) {
+                assertFalse(wasHandled[0]);
+                wasHandled[0] = thr.getMessage().equals("Test");
+            }
+        });
+
+        new Promise<String>() {
+            @Override
+            protected void execute(Resolver<String> resolver) throws Exception {
+                throw new Exception("Test");
+            }
+        };
+
+        assertTrue(wasHandled[0]);
     }
 
     public void testExecutors() {
