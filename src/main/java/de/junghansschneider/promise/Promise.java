@@ -55,7 +55,6 @@ public abstract class Promise<ValueType> {
     protected List<WeakReference<Promise<?>>> mAncestorPromises;
     protected List<Subscription<PromiseValueHandler<ValueType>>> mValueHandlers;
     protected List<Subscription<PromiseErrorHandler>> mErrorHandlers;
-    protected List<Subscription<Runnable>> mAlwaysHandlers;
 
 
     public Promise() {
@@ -154,16 +153,9 @@ public abstract class Promise<ValueType> {
     }
 
     public Promise<ValueType> always(Executor executor, Runnable handler) {
-        synchronized(this) {
-            if (isFinished()) {
-                fireAlways(executor, handler);
-            } else {
-                if (mAlwaysHandlers == null) {
-                    mAlwaysHandlers = new ArrayList<Subscription<Runnable>>(1);
-                }
-                mAlwaysHandlers.add(new Subscription<Runnable>(executor, handler));
-            }
-        }
+        AlwaysWrapper wrapperHandler = new AlwaysWrapper(handler);
+        onValue(executor, wrapperHandler);
+        onError(executor, wrapperHandler);
         return this;
     }
 
@@ -295,10 +287,8 @@ public abstract class Promise<ValueType> {
             state = mState;
             valueHandlers     = mValueHandlers;
             errorHandlers     = mErrorHandlers;
-            alwaysHandlers    = mAlwaysHandlers;
             mValueHandlers    = null;
             mErrorHandlers    = null;
-            mAlwaysHandlers   = null;
             mAncestorPromises = null;
         }
 
@@ -316,11 +306,6 @@ public abstract class Promise<ValueType> {
             }
         } else {
             onFallbackError("Expected finished state, not " + mState);
-        }
-        if (alwaysHandlers != null) {
-            for (Subscription<Runnable> subscription : alwaysHandlers) {
-                fireAlways(subscription.executor, subscription.handler);
-            }
         }
     }
 
@@ -363,28 +348,6 @@ public abstract class Promise<ValueType> {
                         handler.onError(mRejectCause);
                     } catch (Throwable thr) {
                         onFallbackError("Calling onError handler failed");
-                    }
-                }
-            });
-        }
-    }
-
-    protected void fireAlways(Executor executor, final Runnable handler) {
-        assertFinished();
-
-        if (executor == null) {
-            try {
-                handler.run();
-            } catch (Throwable thr) {
-                onFallbackError("Calling always handler failed");
-            }
-        } else {
-            executor.execute(new Runnable() {
-                public void run() {
-                    try {
-                        handler.run();
-                    } catch (Throwable thr) {
-                        onFallbackError("Calling always handler failed");
                     }
                 }
             });
@@ -597,6 +560,26 @@ public abstract class Promise<ValueType> {
         @Override
         public void onError(Throwable thr) {
             mChildPromise.reject(thr);
+        }
+    }
+
+
+    private static class AlwaysWrapper<ValueType> implements PromiseValueHandler<ValueType>, PromiseErrorHandler  {
+
+        private Runnable mNestedHandler;
+
+        AlwaysWrapper(Runnable nestedHandler) {
+            mNestedHandler = nestedHandler;
+        }
+
+        @Override
+        public void onValue(ValueType value) {
+            mNestedHandler.run();
+        }
+
+        @Override
+        public void onError(Throwable thr) {
+            mNestedHandler.run();
         }
     }
 
