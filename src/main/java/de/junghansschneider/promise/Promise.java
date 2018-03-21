@@ -343,7 +343,7 @@ public abstract class Promise<ValueType> {
                     handler.onValue(mValue);
                 } catch (Throwable thr) {
                     String handlerType = (handler instanceof AlwaysWrapper) ? "always" : "onValue";
-                    onFallbackError("Calling " + handlerType + " handler failed");
+                    onFallbackError("Calling " + handlerType + " handler failed", thr);
                 }
             }
         });
@@ -362,7 +362,7 @@ public abstract class Promise<ValueType> {
                     handler.onError(mRejectCause);
                 } catch (Throwable thr) {
                     String handlerType = (handler instanceof AlwaysWrapper) ? "always" : "onError";
-                    onFallbackError("Calling " + handlerType + " handler failed");
+                    onFallbackError("Calling " + handlerType + " handler failed", thr);
                 }
             }
         });
