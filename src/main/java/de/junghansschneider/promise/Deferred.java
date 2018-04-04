@@ -30,7 +30,7 @@ public class Deferred<ValueType> implements Promise.Resolver<ValueType> {
     protected void execute() {
     }
 
-    public Promise getPromise() {
+    public Promise<ValueType> getPromise() {
         return mPromise;
     }
 
